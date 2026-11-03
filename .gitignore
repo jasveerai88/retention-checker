@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+# example videos are generated, not committed — rebuild them with
+# python3 examples/make_examples.py
+examples/*.mp4

@@ -1,0 +1,15 @@
+1
+00:00:05,000 --> 00:00:06,000
+This caption races past before you can read it
+
+2
+00:00:06,000 --> 00:00:09,000
+Then a normal line
+
+3
+00:00:13,000 --> 00:00:16,000
+After a long silence
+
+4
+00:00:16,000 --> 00:00:20,000
+The video finally ends here
