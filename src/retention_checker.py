@@ -36,7 +36,7 @@ Exit codes: 0 PASS, 1 WARN, 2 HOLD or ERROR.
 import argparse, json, re, shutil, statistics, subprocess, sys
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 HOOK_FIRST_WINDOW = 3.0      # seconds: something must happen by here
 HOOK_LATE_START = 1.5        # seconds: speech starting after this is "late"
@@ -438,10 +438,26 @@ def classify_spec(width, height, duration, platform):
 # main
 # --------------------------------------------------------------------------
 
+class _JsonAwareParser(argparse.ArgumentParser):
+    """ArgumentParser that reports usage errors as JSON in --json mode
+    ({"error": ...} on stdout, same exit code 2) — an agent driving
+    this tool with --json never gets plain text or a traceback."""
+
+    json_mode = False
+
+    def error(self, message):
+        if self.json_mode:
+            print(json.dumps({"error": message}))
+            self.exit(2)
+        super().error(message)
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(
+    argv = sys.argv[1:] if argv is None else list(argv)
+    ap = _JsonAwareParser(
         description="retention-checker — pre-publish retention & spec QC "
                     "for faceless / AI-narrated video")
+    ap.json_mode = "--json" in argv
     ap.add_argument("video", help="video file to check")
     ap.add_argument("--captions",
                     help="captions sidecar (.srt/.vtt); auto-detected "
@@ -453,30 +469,38 @@ def main(argv=None):
                     default="youtube-shorts",
                     help="platform spec to judge against "
                          "(default: youtube-shorts)")
+    ap.add_argument("--json", action="store_true",
+                    help="Print one JSON object (verdict, checks, "
+                         "warnings) instead of the human-readable report")
     a = ap.parse_args(argv)
+
+    def fail(msg):
+        # The same clean error in both modes: plain "ERROR: ..." for a
+        # human, {"error": ...} for an agent — exit 2 either way.
+        if a.json:
+            print(json.dumps({"error": msg}))
+        else:
+            print(f"ERROR: {msg}")
+        return 2
 
     p = Path(a.video)
     if not p.is_file():
-        print(f"ERROR: file not found: {p}")
-        return 2
+        return fail(f"file not found: {p}")
     missing = [tool for tool in ("ffmpeg", "ffprobe")
                if shutil.which(tool) is None]
     if missing:
-        print(f"ERROR: {' and '.join(missing)} not found on PATH — "
-              "retention-checker needs FFmpeg (ffmpeg + ffprobe) to "
-              "measure a video. Install FFmpeg and re-run; nothing was "
-              "measured and nothing was passed.")
-        return 2
+        return fail(f"{' and '.join(missing)} not found on PATH — "
+                    "retention-checker needs FFmpeg (ffmpeg + ffprobe) to "
+                    "measure a video. Install FFmpeg and re-run; nothing "
+                    "was measured and nothing was passed.")
     try:
         info = probe_video(p)
     except ToolError as e:
-        print(f"ERROR: {e}")
-        return 2
+        return fail(str(e))
 
     events, cap_name, cap_err = load_caption_events(p, a.captions)
     if cap_err:
-        print(f"ERROR: {cap_err}")
-        return 2
+        return fail(cap_err)
 
     silences = (detect_silences(p, info["duration"])
                 if info["has_audio"] else None)
@@ -497,23 +521,56 @@ def main(argv=None):
                                         info["duration"], a.platform)),
     ]
 
-    print(f"retention-checker v{VERSION} — {p.name}")
-    print(f"Platform: {a.platform} · Duration: {info['duration']:.1f}s · "
-          f"{info['width']}x{info['height']}")
     measured = 0
     worst = 0
-    for name, (status, note) in checks:
-        print(f"  [{status}] {name}: {note}")
+    for _name, (status, _note) in checks:
         if status != "SKIP":
             measured += 1
             worst = max(worst, SEVERITY[status])
+    refusal = None
     if measured < 2:
-        print(f"Verdict: HOLD (only {measured} of 5 checks could measure "
-              "this file — refusing to pass on so little signal)")
+        verdict = "HOLD"
+        refusal = (f"only {measured} of 5 checks could measure this "
+                   "file — refusing to pass on so little signal")
+        exit_code = 2
+    else:
+        verdict = {0: "PASS", 1: "WARN", 2: "HOLD"}[worst]
+        exit_code = worst
+
+    if a.json:
+        payload = {
+            "tool": "retention-checker",
+            "version": VERSION,
+            "file": p.name,
+            "path": str(p),
+            "platform": a.platform,
+            "duration_seconds": info["duration"],
+            "width": info["width"],
+            "height": info["height"],
+            "has_audio": info["has_audio"],
+            "captions": cap_name,
+            "verdict": verdict,
+            "checks": [
+                {"name": name, "status": status, "message": note}
+                for name, (status, note) in checks
+            ],
+            "warnings": [note for _n, (s, note) in checks if s == "WARN"],
+            "measured_checks": measured,
+            "note": refusal,
+        }
+        print(json.dumps(payload, indent=2))
+        return exit_code
+
+    print(f"retention-checker v{VERSION} — {p.name}")
+    print(f"Platform: {a.platform} · Duration: {info['duration']:.1f}s · "
+          f"{info['width']}x{info['height']}")
+    for name, (status, note) in checks:
+        print(f"  [{status}] {name}: {note}")
+    if refusal is not None:
+        print(f"Verdict: HOLD ({refusal})")
         return 2
-    verdict = {0: "PASS", 1: "WARN", 2: "HOLD"}[worst]
     print(f"Verdict: {verdict}")
-    return worst
+    return exit_code
 
 
 if __name__ == "__main__":

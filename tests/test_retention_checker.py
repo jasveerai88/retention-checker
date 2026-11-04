@@ -10,6 +10,7 @@ examples/make_examples.py (ffmpeg required — they SKIP, never fake-pass,
 when ffmpeg is absent) and run the CLI end to end: good passes, bad
 fails, and every error path is a clean ERROR with no traceback.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -396,6 +397,98 @@ class TestCliErrors(unittest.TestCase):
         self.assertIn("ERROR:", r.stdout)
         self.assertIn("ffmpeg", r.stdout)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+
+class TestJsonErrors(unittest.TestCase):
+    """v0.2.0 --json error paths: one JSON object, same exit code,
+    never plain text and never a traceback."""
+
+    def test_json_missing_file_error_object(self):
+        r = run_cli("/nonexistent/definitely-not-here.mp4", "--json")
+        self.assertEqual(r.returncode, 2)
+        data = json.loads(r.stdout)  # must parse as JSON
+        self.assertIn("file not found", data["error"])
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_json_no_ffmpeg_error_object(self):
+        r = run_cli(__file__, "--json",
+                    env_extra={"PATH": "/nonexistent-rc-dir"})
+        self.assertEqual(r.returncode, 2)
+        data = json.loads(r.stdout)
+        self.assertIn("ffmpeg", data["error"])
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
+                     "ffmpeg/ffprobe not on PATH — integration tests "
+                     "skipped, never faked")
+class TestJsonMode(unittest.TestCase):
+    """v0.2.0 --json on the generated examples: parses, carries the
+    verdict + every check, and agrees with the human-mode verdict."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="rc-json-tests-")
+        gen = subprocess.run(
+            [sys.executable, str(EXAMPLES / "make_examples.py"), cls.tmp],
+            capture_output=True, text=True, timeout=600)
+        if gen.returncode != 0:
+            raise unittest.SkipTest(
+                f"example generation failed: {gen.stderr[-500:]}")
+        cls.good = str(Path(cls.tmp) / "good.mp4")
+        cls.bad = str(Path(cls.tmp) / "bad.mp4")
+        cls.silent = str(Path(cls.tmp) / "silent.mp4")
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i",
+             "testsrc2=size=720x1280:rate=30:duration=4",
+             "-c:v", "libx264", "-preset", "ultrafast",
+             "-pix_fmt", "yuv420p", cls.silent],
+            capture_output=True, timeout=300)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_json_good_passes_with_all_checks(self):
+        r = run_cli(self.good, "--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["tool"], "retention-checker")
+        self.assertEqual(data["version"], rc.VERSION)
+        self.assertEqual(data["verdict"], "PASS")
+        self.assertEqual(len(data["checks"]), 5)
+        for c in data["checks"]:
+            self.assertEqual(c["status"], "PASS", c)
+            self.assertIn("name", c)
+            self.assertIn("message", c)
+        self.assertEqual(data["measured_checks"], 5)
+        self.assertAlmostEqual(data["duration_seconds"], 12.0, delta=0.6)
+        self.assertEqual(data["warnings"], [])
+        self.assertIsNone(data["note"])
+
+    def test_json_bad_holds_and_agrees_with_human(self):
+        r = run_cli(self.bad, "--json")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["verdict"], "HOLD")
+        by_name = {c["name"]: c["status"] for c in data["checks"]}
+        self.assertEqual(by_name["Hook window"], "HOLD")
+        self.assertEqual(by_name["Dead zones"], "HOLD")
+        self.assertEqual(by_name["Pacing"], "HOLD")
+        human = run_cli(self.bad)
+        self.assertEqual(human.returncode, 2)
+        self.assertIn(f"Verdict: {data['verdict']}", human.stdout)
+
+    def test_json_silent_video_refusal_stays_hold(self):
+        r = run_cli(self.silent, "--json")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["verdict"], "HOLD")
+        self.assertIn("refusing to pass", data["note"])
+        self.assertLess(data["measured_checks"], 2)
+        statuses = {c["status"] for c in data["checks"]}
+        self.assertIn("SKIP", statuses)  # a SKIP stays a SKIP in JSON
 
 
 if __name__ == "__main__":

@@ -71,7 +71,17 @@ the video's name beside it is auto-detected. An explicitly passed
 captions path that does not exist is an ERROR — a typo'd path is never
 silently ignored.
 
-## Real runs (verbatim, v0.1.0)
+## Use with AI agents
+
+Driving this from a coding agent (Claude Code, Codex, …)? Add `--json`:
+stdout becomes one JSON object with the verdict, all five checks as
+`{name, status, message}` (SKIP stays SKIP — it is never converted to a
+pass), the measured numbers, and the refusal note when a file could not
+be judged. Errors in `--json` mode are JSON too — `{"error": "..."}`
+with exit code 2. Full brief for agents, including the JSON schema and
+exit codes: [SKILL.md](SKILL.md).
+
+## Real runs (verbatim, v0.2.0)
 
 The example videos are generated, not committed (they are tone-based
 speech proxies — the checks judge timing, and a 440 Hz tone times exactly
@@ -86,7 +96,7 @@ python3 examples/make_examples.py   # writes examples/good.mp4 + bad.mp4
 
 ```text
 $ python3 src/retention_checker.py examples/good.mp4
-retention-checker v0.1.0 — good.mp4
+retention-checker v0.2.0 — good.mp4
 Platform: youtube-shorts · Duration: 12.0s · 720x1280
   [PASS] Hook window: first caption content at 0.0s
   [PASS] Dead zones: no silence > 2.5s starting in the first 80% of runtime
@@ -171,12 +181,15 @@ GitHub Sponsors is LIVE: **[github.com/sponsors/jasveerai88](https://github.com/
 python3 -m unittest discover -s tests -v
 ```
 
-45 tests: every check's logic in both directions (unit), plus CLI
+53 tests: every check's logic in both directions (unit), plus CLI
 end-to-end runs on the generated example videos — good PASSes, bad
 HOLDs, a title mismatch WARNs — and every error path (missing file,
 corrupt file, missing captions path, no ffmpeg on PATH) asserted to be
-a clean ERROR with no traceback. Integration tests SKIP, never
-fake-pass, when ffmpeg is absent.
+a clean ERROR with no traceback. The `--json` mode is covered the same
+way in both directions: JSON verdicts on the good/bad examples, the
+refusal HOLD staying a HOLD in JSON, and JSON error objects on the
+error paths. Integration tests SKIP, never fake-pass, when ffmpeg is
+absent.
 
 ## Licence
 

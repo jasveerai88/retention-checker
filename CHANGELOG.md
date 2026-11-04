@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.0 — 2026-11-03
+Agent-ready release (no behaviour change to the existing human output or verdicts):
+- `--json` flag: prints one JSON object to stdout capturing the same verdict and checks as the human report (tool, version, file/path, platform, duration, frame size, has_audio, captions sidecar used, verdict, a checks list of {name, status, message} for all five checks, warnings list, measured_checks count, and the refusal text in `note` when fewer than two checks could measure). Exit codes are unchanged in both modes (0 PASS, 1 WARN, 2 HOLD/ERROR).
+- Error paths in `--json` mode emit `{"error": "<message>"}` as JSON with the same exit code (2) — missing file, corrupt file, missing ffmpeg/ffprobe, missing explicit captions path, and argparse usage errors — never plain text, never a traceback.
+- `SKILL.md` added at repo root: an agent-facing brief (purpose, exact commands incl. `--json`, the full JSON schema, exit codes, honesty rules — a SKIP is not a PASS and the refusal HOLD means "could not be judged").
+- README gained a "Use with AI agents" section pointing at `--json` + `SKILL.md`.
+- 5 tests added (53 total, all passing): JSON error objects for a missing file and for missing ffmpeg (both exit 2), JSON PASS on the generated good example with all five checks, JSON HOLD on the bad example agreeing with the human-mode verdict, and the silent-video refusal staying a HOLD in JSON with its SKIP checks still visible as SKIP.
+
 ## v0.1.0 — 2026-11-03
 
 First release.
