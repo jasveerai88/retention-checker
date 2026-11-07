@@ -1,3 +1,5 @@
+> **Merged into [Faceless QC Lite](https://github.com/jasveerai88/faceless-qc-lite)** — as of v2.0.0 this tool ships inside the Faceless QC Lite pre-upload suite: same checks, byte-identical engine, plus one combined `suite` run across all six checks. This repo stays public for existing links; development continues there. Install the suite: `pipx install faceless-qc-lite`
+
 # retention-checker
 
 **A pre-publish retention check for faceless and AI-narrated video — run it before you upload, not after the comments tell you.**
